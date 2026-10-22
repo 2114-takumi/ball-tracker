@@ -19,6 +19,12 @@ kernel = np.ones((9, 9), np.uint8)
 # ノイズ除去のための最小輪郭面積
 min_area = 500
 
+# 検出するボールの半径の範囲（ピクセル）
+min_radius = 10
+max_radius = 100
+
+trajectory = []
+
 while True:
 
     # ① カメラ画像を取得
@@ -77,47 +83,57 @@ while True:
                 largest_contour
             )
 
-            x, y = center
+            if min_radius <= radius <= max_radius:
+                x, y = center
 
-            x = int(x)
-            y = int(y)
-            radius = int(radius)
+                x = int(x)
+                y = int(y)
+                trajectory.append((x, y))
+                if len(trajectory) > 30:
+                    trajectory.pop(0)
+                radius = int(radius)
 
-            ball_center = (x, y)
-            ball_radius = radius
+                ball_center = (x, y)
+                ball_radius = radius
 
-            # ⑧ 緑色の外接円
-            cv2.circle(
-                frame,
-                (x, y),
-                radius,
-                (0, 255, 0),
-                2
-            )
+                # ⑧ 緑色の外接円
+                cv2.circle(
+                    frame,
+                    (x, y),
+                    radius,
+                    (0, 255, 0),
+                    2
+                )
 
-            # ⑨ 赤色の中心点
-            cv2.circle(
-                frame,
-                (x, y),
-                4,
-                (0, 0, 255),
-                -1
-            )
+                # ⑨ 赤色の中心点
+                cv2.circle(
+                    frame,
+                    (x, y),
+                    4,
+                    (0, 0, 255),
+                    -1
+                )
 
-            # ⑩ 中心座標を表示
-            cv2.putText(
-                frame,
-                f"({x}, {y})",
-                (x + 10, y - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 0, 255),
-                2
-            )
+                # ⑩ 中心座標を表示
+                cv2.putText(
+                    frame,
+                    f"({x}, {y})",
+                    (x + 10, y - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 0, 255),
+                    2
+                )
+
+    for i in range(1, len(trajectory)):
+        point1 = trajectory[i - 1]
+        point2 = trajectory[i]
+        cv2.line(frame, point1, point2, (255, 0, 0), 2)
 
     # ⑪ FPS測定
     current_time = time.perf_counter()
     elapsed_time = current_time - start_time
+
 
     if elapsed_time >= 1.0:
 
@@ -125,6 +141,7 @@ while True:
 
         print(f"FPS: {fps:.2f}")
         print(f"Largest Contour Area: {area:.1f}")
+        print(f"Trajectory points: {len(trajectory)}")
 
         if ball_center is not None:
             print(f"Ball Center: {ball_center}")
@@ -134,6 +151,7 @@ while True:
 
         start_time = current_time
         frame_count = 0
+
 
     # ⑫ 映像を表示
     cv2.imshow("White Mask", mask)
