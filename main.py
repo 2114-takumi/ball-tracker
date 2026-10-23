@@ -24,6 +24,29 @@ min_radius = 10
 max_radius = 100
 
 trajectory = []
+previous_center = None
+previous_time = None
+
+# 比較する移動平均の窓幅
+window_sizes = [1, 5, 10]
+
+# 速度履歴は最大10回分保存
+smoothing_window = max(window_sizes)
+
+# 画面表示にはWindow=5を使用
+display_window = 5
+
+vx_history = []
+vy_history = []
+
+# 予測時間
+prediction_time = 0.2
+
+# 各Windowの予測・誤差を別々に管理
+pending_predictions = {w: [] for w in window_sizes}
+prediction_errors = {w: [] for w in window_sizes}
+all_prediction_errors = {w: [] for w in window_sizes}
+
 
 while True:
 
@@ -125,6 +148,117 @@ while True:
                     2
                 )
 
+    # 速度計算
+    vx = None
+    vy = None
+    speed = None
+    avg_vx = None
+    avg_vy = None
+    
+    if ball_center is not None:
+        detection_time = time.perf_counter()
+        if previous_center is not None and previous_time is not None:
+            dt = detection_time - previous_time
+            if dt > 0:
+                vx = (ball_center[0] - previous_center[0]) / dt
+                vy = (ball_center[1] - previous_center[1]) / dt
+
+                speed = np.hypot(vx, vy)
+
+                vx_history.append(vx)
+                vy_history.append(vy)
+
+                # 最大10回分の速度を保存
+                if len(vx_history) > smoothing_window:
+                    vx_history.pop(0)
+                    vy_history.pop(0)
+
+                # 画面表示用：Window=5の平均速度
+                avg_vx = np.mean(vx_history[-display_window:])
+                avg_vy = np.mean(vy_history[-display_window:])
+
+                # 10回分の速度がそろってから公平に比較
+                if len(vx_history) == smoothing_window:
+                    for window in window_sizes:
+                        mean_vx = np.mean(vx_history[-window:])
+                        mean_vy = np.mean(vy_history[-window:])
+
+                        pred_x = ball_center[0] + mean_vx * prediction_time
+                        pred_y = ball_center[1] + mean_vy * prediction_time
+                        target_time = detection_time + prediction_time
+
+                        pending_predictions[window].append(
+                            (target_time, (pred_x, pred_y))
+                        )
+
+        previous_center = ball_center
+        previous_time = detection_time
+    else:
+        previous_center = None
+        previous_time = None
+
+        trajectory.clear()
+        vx_history.clear()
+        vy_history.clear()
+        for window in window_sizes:
+            pending_predictions[window].clear()
+
+
+    # 速度ベクトルを矢印で表示
+    if ball_center is not None and avg_vx is not None and avg_vy is not None:
+
+        # 矢印の始点
+        start_point = ball_center
+
+        # 矢印の長さを調整する時間
+        arrow_time = 0.1
+
+        # 矢印の終点
+        x_end = int(ball_center[0] + avg_vx * arrow_time)
+        y_end = int(ball_center[1] + avg_vy * arrow_time)
+
+        end_point = (x_end, y_end)
+
+        # 矢印を描画
+        cv2.arrowedLine(
+            frame,
+            start_point,
+            end_point,
+            (255, 255, 0),
+            3,
+            tipLength=0.2
+        ) 
+
+        prediction_time = 0.2
+
+        predicted_x = int(ball_center[0] + avg_vx * prediction_time)                
+        predicted_y = int(ball_center[1] + avg_vy * prediction_time)
+
+        cv2.circle(
+            frame,
+            (predicted_x, predicted_y),
+            6,
+            (255, 0, 255),
+            -1
+        )
+
+    # 3種類の予測誤差を同時に評価
+    if ball_center is not None:
+        for window in window_sizes:
+            while (
+                pending_predictions[window]
+                and pending_predictions[window][0][0] <= detection_time
+            ):
+                target_time, predicted_center = (
+                    pending_predictions[window].pop(0)
+                )
+                error = np.hypot(
+                    ball_center[0] - predicted_center[0],
+                    ball_center[1] - predicted_center[1]
+                )
+                prediction_errors[window].append(error)
+                all_prediction_errors[window].append(error)
+
     for i in range(1, len(trajectory)):
         point1 = trajectory[i - 1]
         point2 = trajectory[i]
@@ -142,6 +276,8 @@ while True:
         print(f"FPS: {fps:.2f}")
         print(f"Largest Contour Area: {area:.1f}")
         print(f"Trajectory points: {len(trajectory)}")
+        if speed is not None:
+            print(f"Speed: {speed:.2f} px/s")
 
         if ball_center is not None:
             print(f"Ball Center: {ball_center}")
@@ -149,6 +285,27 @@ while True:
         else:
             print("Ball not detected")
 
+        if vx is not None:
+            print(f"Velocity X: {vx:.2f} px/s")
+
+        if vy is not None:
+            print(f"Velocity Y: {vy:.2f} px/s") 
+
+        if vx is not None and vy is not None and avg_vx is not None and avg_vy is not None:
+            print(f"Raw vx: {vx:.2f} px/s")
+            print(f"Average vx: {avg_vx:.2f} px/s")
+            print(f"Raw vy: {vy:.2f} px/s")
+            print(f"Average vy: {avg_vy:.2f} px/s")
+
+        for window in window_sizes:
+            if prediction_errors[window]:
+                mean_error = np.mean(prediction_errors[window])
+                print(
+                    f"Window={window}: "
+                    f"Mean Prediction Error: {mean_error:.2f} px"
+                )
+                prediction_errors[window].clear()
+            
         start_time = current_time
         frame_count = 0
 
@@ -164,5 +321,16 @@ while True:
         break
 
 # ⑬ 終了処理
+print("\n=== Prediction Comparison ===")
+for window in window_sizes:
+    errors = all_prediction_errors[window]
+    if errors:
+        overall_mean_error = np.mean(errors)
+        print(
+            f"Window={window}: "
+            f"Total Predictions={len(errors)}, "
+            f"Overall Mean Error={overall_mean_error:.2f} px"
+        )
+
 cap.release()
 cv2.destroyAllWindows()
