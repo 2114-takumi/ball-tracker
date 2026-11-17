@@ -1,5 +1,7 @@
 # Baseball Tracker — リアルタイム野球ボール追跡・位置予測
 
+[![Python CI](https://github.com/2114-takumi/ball-tracker/actions/workflows/python-ci.yml/badge.svg)](https://github.com/2114-takumi/ball-tracker/actions/workflows/python-ci.yml)
+
 ## Overview
 
 PythonとOpenCVを使い、Webカメラに映った野球ボールの位置・移動軌跡・速度を推定し、**0.2秒後の位置**を予測する学習プロジェクトです。白い物体が複数映る環境での検出の安定化と、速度平滑化アルゴリズムの比較評価にも取り組みました。
