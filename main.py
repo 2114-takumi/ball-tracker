@@ -78,9 +78,12 @@ adaptive_window_counts = {1: 0, 5: 0}
 
 
 while True:
+    loop_start = time.perf_counter()
+    read_start = time.perf_counter()
 
     # ① カメラ画像を取得
     ret, frame = cap.read()
+    read_end = time.perf_counter()
 
     if not ret:
         print("画像を取得できませんでした")
@@ -113,6 +116,11 @@ while True:
         cv2.CHAIN_APPROX_SIMPLE
     )
 
+    # デバッグ用：検出したすべての輪郭を表示
+    debug_frame = frame.copy()
+    cv2.drawContours(debug_frame, contours, -1, (0, 165, 255), 2)
+    cv2.imshow("All Contours (Debug)", debug_frame)
+
     # 検出結果の初期化
     area = 0
     ball_center = None
@@ -143,15 +151,21 @@ while True:
         circularity = (
             4 * np.pi * contour_area / (perimeter ** 2)
         )
-        if circularity < min_circularity:
-            continue
-
         # 外接円の中心と半径
         center, radius = cv2.minEnclosingCircle(contour)
         if not (min_radius <= radius <= max_radius):
             continue
 
-        ball_candidates.append((contour_area, center, radius, circularity))
+        # 外接円に対する輪郭面積の割合
+        fill_ratio = contour_area / (np.pi * radius ** 2)
+
+        # 円形度も面積比も低い場合だけ除外
+        if circularity < min_circularity and fill_ratio < 0.75:
+            continue
+
+        ball_candidates.append(
+            (contour_area, center, radius, circularity)
+        )
 
     selected = None
     if ball_candidates:
@@ -493,6 +507,12 @@ while True:
     cv2.imshow("Ball Detection", frame)
     # qキーで終了
     key = cv2.waitKey(1)
+    loop_end = time.perf_counter()
+    read_ms = (read_end - read_start) * 1000
+    loop_ms = (loop_end - loop_start) * 1000
+    if total_frames % 30 == 0:
+        print(f"Read Time: {read_ms:.2f} ms")
+        print(f"Loop Time: {loop_ms:.2f} ms")
 
     if key & 0xFF == ord('q'):
         break
