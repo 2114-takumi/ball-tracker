@@ -22,7 +22,7 @@ kernel = np.ones((9, 9), np.uint8)
 # 手とボールの細い接続部分を分離するためのカーネル
 opening_kernel = cv2.getStructuringElement(
     cv2.MORPH_ELLIPSE,
-    (11, 11)
+    (9, 9)
 )
 
 # ノイズ除去のための最小輪郭面積
