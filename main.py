@@ -17,8 +17,13 @@ frame_count = 0
 total_frames = 0
 detected_frames = 0
 
-# モルフォロジー処理用カーネル
+# クロージング用カーネル
 kernel = np.ones((9, 9), np.uint8)
+# 手とボールの細い接続部分を分離するためのカーネル
+opening_kernel = cv2.getStructuringElement(
+    cv2.MORPH_ELLIPSE,
+    (17, 17)
+)
 
 # ノイズ除去のための最小輪郭面積
 min_area = 500
@@ -102,9 +107,16 @@ while True:
         (179, 75, 255)
     )
 
-    # ④ クロージングで穴埋め
-    cleaned_mask = cv2.morphologyEx(
+    # ① 先にOpeningで細い接続部分を除去
+    opened_mask = cv2.morphologyEx(
         mask,
+        cv2.MORPH_OPEN,
+        opening_kernel
+    )
+
+    # ② Closingで小さな穴を埋める
+    cleaned_mask = cv2.morphologyEx(
+        opened_mask,
         cv2.MORPH_CLOSE,
         kernel
     )
@@ -503,6 +515,7 @@ while True:
 
     # ⑫ 映像を表示
     cv2.imshow("White Mask", mask)
+    cv2.imshow("Opening Mask", opened_mask)
     cv2.imshow("Cleaned Mask", cleaned_mask)
     cv2.imshow("Ball Detection", frame)
     # qキーで終了
