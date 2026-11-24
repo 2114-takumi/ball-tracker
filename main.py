@@ -44,6 +44,10 @@ tracking_center = None
 # 前回追跡したボールの半径
 tracking_radius = None
 
+# 中心座標の平滑化用
+smoothed_center = None
+alpha = 0.25
+
 # 前回位置から許容する最大移動距離
 max_tracking_distance = 50
 
@@ -309,9 +313,6 @@ while True:
 
         x = int(x)
         y = int(y)
-        trajectory.append((x, y))
-        if len(trajectory) > 30:
-            trajectory.pop(0)
         radius = int(radius)
 
         ball_center = (x, y)
@@ -320,10 +321,30 @@ while True:
         missed_frames = 0
         ball_radius = radius
 
+        # STEP 40-12：中心座標を平滑化する
+        if smoothed_center is None:
+            smoothed_center = (float(x), float(y))
+        else:
+            smoothed_center = (
+                alpha * x + (1 - alpha) * smoothed_center[0],
+                alpha * y + (1 - alpha) * smoothed_center[1]
+            )
+
+        # 描画に使う整数座標
+        display_center = (
+            int(round(smoothed_center[0])),
+            int(round(smoothed_center[1]))
+        )
+
+        # 平滑化した座標を軌跡に保存
+        trajectory.append(display_center)
+        if len(trajectory) > 30:
+            trajectory.pop(0)
+
         # ⑧ 緑色の外接円
         cv2.circle(
             frame,
-            (x, y),
+            display_center,
             radius,
             (0, 255, 0),
             2
@@ -332,7 +353,7 @@ while True:
         # ⑨ 赤色の中心点
         cv2.circle(
             frame,
-            (x, y),
+            display_center,
             4,
             (0, 0, 255),
             -1
@@ -341,8 +362,8 @@ while True:
         # ⑩ 中心座標を表示
         cv2.putText(
             frame,
-            f"({x}, {y})",
-            (x + 10, y - 10),
+            f"{display_center}",
+            (display_center[0] + 10, display_center[1] - 10),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
             (0, 0, 255),
@@ -421,6 +442,8 @@ while True:
         # 5フレーム連続で失敗したら追跡位置をリセット
         if missed_frames >= max_missed_frames:
             tracking_center = None
+            tracking_radius = None
+            smoothed_center = None
 
     # STEP 36-1：運動状態の判定
     motion_state = "Measuring"
