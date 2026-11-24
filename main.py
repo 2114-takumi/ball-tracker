@@ -17,6 +17,13 @@ frame_count = 0
 total_frames = 0
 detected_frames = 0
 
+# STEP 40-15：検出方法別のフレーム数
+detection_counts = {
+    "Contour": 0,
+    "Hough": 0,
+    "Not detected": 0
+}
+
 # クロージング用カーネル
 kernel = np.ones((7, 7), np.uint8)
 # 手とボールの細い接続部分を分離するためのカーネル
@@ -314,6 +321,9 @@ while True:
         detection_method = "Hough"
     else:
         detection_method = "Contour"
+
+    # STEP 40-15：今回のフレームで使われた方法を記録
+    detection_counts[detection_method] += 1
 
     if selected is not None:
         selected_area, center, radius, ball_circularity = selected
@@ -788,6 +798,30 @@ if total_frames > 0:
     print(f"Detection Rate: {detection_rate:.2f}%")
 else:
     print("No frames captured")
+
+# STEP 40-15：検出方法別の性能集計
+print("\n=== Detection Method Comparison ===")
+if total_frames > 0:
+    for method, count in detection_counts.items():
+        percentage = count / total_frames * 100
+        print(
+            f"{method}: "
+            f"{count} frames ({percentage:.2f}%)"
+        )
+
+    # 正常に検出したフレームの中でのHough使用割合
+    if detected_frames > 0:
+        hough_rate = (
+            detection_counts["Hough"] / detected_frames * 100
+        )
+        print(
+            f"Hough Share Among Detections: {hough_rate:.2f}%"
+        )
+
+    # 集計が正しいことを確認
+    counted_frames = sum(detection_counts.values())
+    print(f"Counted Frames: {counted_frames}")
+    print(f"Total Frames: {total_frames}")
 
 cap.release()
 cv2.destroyAllWindows()
