@@ -137,7 +137,7 @@ while True:
     # デバッグ用：検出したすべての輪郭を表示
     debug_frame = frame.copy()
     cv2.drawContours(debug_frame, contours, -1, (0, 165, 255), 2)
-    cv2.imshow("All Contours (Debug)", debug_frame)
+    # cv2.imshow("All Contours (Debug)", debug_frame)
 
     # 検出結果の初期化
     area = 0
@@ -305,7 +305,7 @@ while True:
                     2
                 )
 
-    cv2.imshow("Hough Debug", hough_debug)
+    # cv2.imshow("Hough Debug", hough_debug)
 
     # STEP 40-13：採用したボールの検出方法を判定
     if selected is None:
@@ -723,9 +723,11 @@ while True:
 
 
     # ⑫ 映像を表示
-    cv2.imshow("White Mask", mask)
-    cv2.imshow("Opening Mask", opened_mask)
-    cv2.imshow("Cleaned Mask", cleaned_mask)
+    # デバッグ用（必要なときだけ有効化）
+    # cv2.imshow("White Mask", mask)
+    # cv2.imshow("Opening Mask", opened_mask)
+    # cv2.imshow("Cleaned Mask", cleaned_mask)
+    # 完成版のメイン画面
     cv2.imshow("Ball Detection", frame)
     # qキーで終了
     key = cv2.waitKey(1)
