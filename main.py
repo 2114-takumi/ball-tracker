@@ -307,6 +307,14 @@ while True:
 
     cv2.imshow("Hough Debug", hough_debug)
 
+    # STEP 40-13：採用したボールの検出方法を判定
+    if selected is None:
+        detection_method = "Not detected"
+    elif selected[0] is None:
+        detection_method = "Hough"
+    else:
+        detection_method = "Contour"
+
     if selected is not None:
         selected_area, center, radius, ball_circularity = selected
         x, y = center
@@ -444,6 +452,17 @@ while True:
             tracking_center = None
             tracking_radius = None
             smoothed_center = None
+
+    # STEP 40-13：検出方法を画面に表示
+    cv2.putText(
+        frame,
+        f"Detection: {detection_method}",
+        (10, 90),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (0, 255, 255),
+        2
+    )
 
     # STEP 36-1：運動状態の判定
     motion_state = "Measuring"
