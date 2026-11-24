@@ -18,7 +18,7 @@ total_frames = 0
 detected_frames = 0
 
 # クロージング用カーネル
-kernel = np.ones((9, 9), np.uint8)
+kernel = np.ones((7, 7), np.uint8)
 # 手とボールの細い接続部分を分離するためのカーネル
 opening_kernel = cv2.getStructuringElement(
     cv2.MORPH_ELLIPSE,
@@ -41,6 +41,8 @@ previous_time = None
 
 # 前回追跡したボールの中心
 tracking_center = None
+# 前回追跡したボールの半径
+tracking_radius = None
 
 # 前回位置から許容する最大移動距離
 max_tracking_distance = 50
@@ -107,14 +109,14 @@ while True:
         (179, 75, 255)
     )
 
-    # ① 先にOpeningで細い接続部分を除去
+    # ① Opening：指との細い接続部分を除去
     opened_mask = cv2.morphologyEx(
         mask,
         cv2.MORPH_OPEN,
         opening_kernel
     )
 
-    # ② Closingで小さな穴を埋める
+    # ② Closing：ボール内部の穴や隙間を埋める
     cleaned_mask = cv2.morphologyEx(
         opened_mask,
         cv2.MORPH_CLOSE,
@@ -171,8 +173,23 @@ while True:
         # 外接円に対する輪郭面積の割合
         fill_ratio = contour_area / (np.pi * radius ** 2)
 
-        # 円形度も面積比も低い場合だけ除外
-        if circularity < min_circularity and fill_ratio < 0.75:
+        # 前回のボール中心に近いか確認
+        near_previous = (
+            tracking_center is not None
+            and np.hypot(
+                center[0] - tracking_center[0],
+                center[1] - tracking_center[1]
+            ) <= 20
+        )
+
+        # 追跡中の近い輪郭だけ、面積比の条件を緩和
+        if near_previous:
+            min_fill_ratio = 0.65
+        else:
+            min_fill_ratio = 0.75
+
+        # 円形度または面積比の条件を満たせば候補に残す
+        if circularity < min_circularity and fill_ratio < min_fill_ratio:
             continue
 
         ball_candidates.append(
@@ -205,6 +222,87 @@ while True:
             if distance <= max_tracking_distance:
                 selected = closest
 
+    # STEP 40-10：輪郭検出に失敗したときの円検出実験
+    hough_debug = frame.copy()
+
+    if selected is None and tracking_center is not None:
+
+        # 前回のボール位置周辺を切り出す
+        h, w = frame.shape[:2]
+        px, py = tracking_center
+        margin = 110
+
+        x1 = max(0, int(px - margin))
+        y1 = max(0, int(py - margin))
+        x2 = min(w, int(px + margin))
+        y2 = min(h, int(py + margin))
+
+        roi = frame[y1:y2, x1:x2]
+
+        # グレースケール化と平滑化
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (9, 9), 2)
+
+        # 円を検出
+        circles = cv2.HoughCircles(
+            gray,
+            cv2.HOUGH_GRADIENT,
+            dp=1.2,
+            minDist=80,
+            param1=100,
+            param2=25,
+            minRadius=50,
+            maxRadius=100
+        )
+
+        if circles is not None:
+            best_circle = None
+            best_distance = float("inf")
+            for cx, cy, r in circles[0]:
+                hough_center = (
+                    int(cx + x1), int(cy + y1)
+                )
+                distance = np.hypot(
+                    hough_center[0] - px,
+                    hough_center[1] - py
+                )
+
+                # 前回位置から40px以内
+                position_ok = distance <= 40
+                # 前回半径との差が15px以内
+                radius_ok = (
+                    tracking_radius is not None
+                    and abs(r - tracking_radius) <= 15
+                )
+
+                if position_ok and radius_ok:
+                    if distance < best_distance:
+                        best_distance = distance
+                        best_circle = (
+                            hough_center,
+                            float(r)
+                        )
+
+            if best_circle is not None:
+                hough_center, hough_radius = best_circle
+                # Houghで見つけた円をボール候補として採用
+                selected = (
+                    None,
+                    hough_center,
+                    hough_radius,
+                    None
+                )
+                # デバッグ画面に水色の円を描画
+                cv2.circle(
+                    hough_debug,
+                    hough_center,
+                    int(hough_radius),
+                    (255, 255, 0),
+                    2
+                )
+
+    cv2.imshow("Hough Debug", hough_debug)
+
     if selected is not None:
         selected_area, center, radius, ball_circularity = selected
         x, y = center
@@ -218,6 +316,7 @@ while True:
 
         ball_center = (x, y)
         tracking_center = ball_center
+        tracking_radius = radius
         missed_frames = 0
         ball_radius = radius
 
@@ -252,6 +351,74 @@ while True:
 
     else:
         missed_frames += 1
+
+        # 追跡を見失った最初のフレームだけ調査
+        if missed_frames == 1 and tracking_center is not None:
+            measurements = []
+
+            for contour in contours:
+                # 輪郭面積
+                a = cv2.contourArea(contour)
+                if a < min_area:
+                    continue
+
+                # 周囲長
+                p = cv2.arcLength(contour, True)
+                if p == 0:
+                    continue
+
+                # 外接円
+                center, r = cv2.minEnclosingCircle(contour)
+                if r == 0:
+                    continue
+
+                # 円形度
+                c = 4 * np.pi * a / (p ** 2)
+                # 面積比
+                f = a / (np.pi * r ** 2)
+                # 前回のボール位置からの距離
+                d = np.hypot(
+                    center[0] - tracking_center[0],
+                    center[1] - tracking_center[1]
+                )
+                measurements.append((d, a, r, c, f))
+
+            print("\n=== Tracking Lost ===")
+            print(f"Ball Candidates: {len(ball_candidates)}")
+
+            if measurements:
+                # 前回位置に近い輪郭を最大3個表示
+                closest_contours = sorted(
+                    measurements,
+                    key=lambda item: item[0]
+                )[:3]
+
+                for d, a, r, c, f in closest_contours:
+                    radius_ok = min_radius <= r <= max_radius
+                    near_previous = d <= 20
+                    if near_previous:
+                        min_fill_ratio = 0.65
+                    else:
+                        min_fill_ratio = 0.75
+                    shape_ok = (
+                        c >= min_circularity or f >= min_fill_ratio
+                    )
+                    distance_ok = d <= max_tracking_distance
+
+                    print(
+                        f"Area={a:.0f}, Radius={r:.1f}, "
+                        f"Circularity={c:.3f}, Fill={f:.3f}, "
+                        f"Distance={d:.1f}"
+                    )
+                    print(
+                        f"Radius OK: {radius_ok}, "
+                        f"Shape OK: {shape_ok}, "
+                        f"Distance OK: {distance_ok}"
+                    )
+            else:
+                print("No contours above min_area")
+
+        # 5フレーム連続で失敗したら追跡位置をリセット
         if missed_frames >= max_missed_frames:
             tracking_center = None
 
