@@ -540,6 +540,10 @@ while True:
     speed = None
     avg_vx = None
     avg_vy = None
+    # STEP 41-3：Hybridの画面表示用
+    hybrid_pred_x = None
+    hybrid_pred_y = None
+    hybrid_method = None
     
     if ball_center is not None:
         detection_time = time.perf_counter()
@@ -681,34 +685,33 @@ while True:
         2
     )
 
-    # STEP 37-2：表示するWindowを自動選択
-    if (
-        ball_center is not None
-        and vx is not None
-        and vy is not None
-        and avg_vx is not None
-        and avg_vy is not None
-    ):
-        if motion_state == "Turning":
-            selected_window = 1
-            display_vx = vx
-            display_vy = vy
+    # STEP 41-3：Hybrid方式を画面に表示
+    if hybrid_method is not None:
+        # Hybridが使用する位置と速度を選択
+        if hybrid_method == "EMA":
+            origin_x, origin_y = smoothed_center
         else:
-            selected_window = 5
-            display_vx = avg_vx
-            display_vy = avg_vy
+            origin_x, origin_y = ball_center
 
-        # 矢印の始点
-        start_point = ball_center
+        display_vx = (
+            hybrid_pred_x - origin_x
+        ) / prediction_time
+        display_vy = (
+            hybrid_pred_y - origin_y
+        ) / prediction_time
 
-        # 矢印の長さを調整する時間
+        # 速度ベクトルの始点
+        start_point = (
+            int(round(origin_x)),
+            int(round(origin_y))
+        )
+
+        # 速度ベクトルを0.1秒分の長さで表示
         arrow_time = 0.1
-
-        # 矢印の終点
-        x_end = int(ball_center[0] + display_vx * arrow_time)
-        y_end = int(ball_center[1] + display_vy * arrow_time)
-
-        end_point = (x_end, y_end)
+        end_point = (
+            int(round(origin_x + display_vx * arrow_time)),
+            int(round(origin_y + display_vy * arrow_time))
+        )
 
         # 矢印を描画
         cv2.arrowedLine(
@@ -718,16 +721,12 @@ while True:
             (255, 255, 0),
             3,
             tipLength=0.2
-        ) 
+        )
 
-        prediction_time = 0.2
-
-        predicted_x = int(ball_center[0] + display_vx * prediction_time)                
-        predicted_y = int(ball_center[1] + display_vy * prediction_time)
-
+        # Hybridの予測位置を紫色で表示
         cv2.circle(
             frame,
-            (predicted_x, predicted_y),
+            (int(round(hybrid_pred_x)), int(round(hybrid_pred_y))),
             6,
             (255, 0, 255),
             -1
@@ -735,7 +734,7 @@ while True:
 
         cv2.putText(
             frame,
-            f"Selected Window: {selected_window}",
+            f"Hybrid: {hybrid_method} Window={display_window}",
             (10, 60),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.7,
