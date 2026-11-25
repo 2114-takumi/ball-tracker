@@ -45,6 +45,8 @@ min_circularity = 0.70
 trajectory = []
 previous_center = None
 previous_time = None
+# STEP 40-16：前回のEMA座標
+previous_smoothed_center = None
 
 # 前回追跡したボールの中心
 tracking_center = None
@@ -73,6 +75,9 @@ display_window = 5
 
 vx_history = []
 vy_history = []
+# EMA座標から求めた速度履歴
+ema_vx_history = []
+ema_vy_history = []
 
 # 予測時間
 prediction_time = 0.2
@@ -81,6 +86,9 @@ prediction_time = 0.2
 pending_predictions = {w: [] for w in window_sizes}
 prediction_errors = {w: [] for w in window_sizes}
 all_prediction_errors = {w: [] for w in window_sizes}
+# EMA方式の予測と評価結果
+ema_pending_predictions = []
+ema_prediction_errors = []
 motion_states = ["Stationary", "Moving", "Turning"]
 state_prediction_errors = {
     state: {w: [] for w in window_sizes}
@@ -528,6 +536,23 @@ while True:
                 vx_history.append(vx)
                 vy_history.append(vy)
 
+                # STEP 40-16：EMA座標から速度を計算
+                if previous_smoothed_center is not None:
+                    ema_vx = (
+                        smoothed_center[0]
+                        - previous_smoothed_center[0]
+                    ) / dt
+                    ema_vy = (
+                        smoothed_center[1]
+                        - previous_smoothed_center[1]
+                    ) / dt
+                    ema_vx_history.append(ema_vx)
+                    ema_vy_history.append(ema_vy)
+                    # 速度履歴は最大10回分保存
+                    if len(ema_vx_history) > smoothing_window:
+                        ema_vx_history.pop(0)
+                        ema_vy_history.pop(0)
+
                 # 最大10回分の速度を保存
                 if len(vx_history) > smoothing_window:
                     vx_history.pop(0)
@@ -551,15 +576,41 @@ while True:
                             (target_time, (pred_x, pred_y), motion_state)
                         )
 
+                    # EMA方式でも0.2秒後の位置を予測
+                    if len(ema_vx_history) >= display_window:
+                        ema_mean_vx = np.mean(
+                            ema_vx_history[-display_window:]
+                        )
+                        ema_mean_vy = np.mean(
+                            ema_vy_history[-display_window:]
+                        )
+                        ema_pred_x = (
+                            smoothed_center[0]
+                            + ema_mean_vx * prediction_time
+                        )
+                        ema_pred_y = (
+                            smoothed_center[1]
+                            + ema_mean_vy * prediction_time
+                        )
+                        ema_pending_predictions.append(
+                            (detection_time + prediction_time,
+                             (ema_pred_x, ema_pred_y))
+                        )
+
         previous_center = ball_center
+        previous_smoothed_center = smoothed_center
         previous_time = detection_time
     else:
         previous_center = None
+        previous_smoothed_center = None
         previous_time = None
 
         trajectory.clear()
         vx_history.clear()
         vy_history.clear()
+        ema_vx_history.clear()
+        ema_vy_history.clear()
+        ema_pending_predictions.clear()
         for window in window_sizes:
             pending_predictions[window].clear()
 
@@ -667,6 +718,21 @@ while True:
                     adaptive_errors.append(error)
                     adaptive_errors_recent.append(error)
                     adaptive_window_counts[chosen_window] += 1
+
+    # STEP 40-16：EMA方式の予測誤差を評価
+    if ball_center is not None:
+        while (
+            ema_pending_predictions
+            and ema_pending_predictions[0][0] <= detection_time
+        ):
+            target_time, ema_predicted_center = (
+                ema_pending_predictions.pop(0)
+            )
+            ema_error = np.hypot(
+                ball_center[0] - ema_predicted_center[0],
+                ball_center[1] - ema_predicted_center[1]
+            )
+            ema_prediction_errors.append(ema_error)
 
     for i in range(1, len(trajectory)):
         point1 = trajectory[i - 1]
@@ -822,6 +888,21 @@ if total_frames > 0:
     counted_frames = sum(detection_counts.values())
     print(f"Counted Frames: {counted_frames}")
     print(f"Total Frames: {total_frames}")
+
+# STEP 40-16：従来方式とEMA方式の比較
+print("\n=== Raw vs EMA Prediction Comparison ===")
+raw_errors = all_prediction_errors[5]
+if raw_errors and ema_prediction_errors:
+    raw_mean = np.mean(raw_errors)
+    ema_mean = np.mean(ema_prediction_errors)
+    print(f"Raw Window=5: {raw_mean:.2f} px")
+    print(f"EMA Window=5: {ema_mean:.2f} px")
+    print(f"Raw Predictions: {len(raw_errors)}")
+    print(f"EMA Predictions: {len(ema_prediction_errors)}")
+    if len(raw_errors) != len(ema_prediction_errors):
+        print("Warning: Prediction counts do not match")
+else:
+    print("Not enough predictions")
 
 cap.release()
 cv2.destroyAllWindows()
