@@ -100,6 +100,19 @@ ema_state_prediction_errors = {
     state: [] for state in motion_states
 }
 
+# STEP 40-18：Hybrid方式の予測と評価
+hybrid_pending_predictions = []
+hybrid_prediction_errors = []
+# 運動状態別のHybrid予測誤差
+hybrid_state_prediction_errors = {
+    state: [] for state in motion_states
+}
+# 評価した予測で使用した方式の回数
+hybrid_method_counts = {
+    "Raw": 0,
+    "EMA": 0
+}
+
 # STEP 37：適応的Window選択の評価
 adaptive_errors = []
 adaptive_errors_recent = []
@@ -605,6 +618,39 @@ while True:
                             )
                         )
 
+                        # STEP 40-18：Hybrid方式
+                        if motion_state == "Turning":
+                            # Turning時はRaw Window=5
+                            raw_mean_vx = np.mean(
+                                vx_history[-display_window:]
+                            )
+                            raw_mean_vy = np.mean(
+                                vy_history[-display_window:]
+                            )
+                            hybrid_pred_x = (
+                                ball_center[0]
+                                + raw_mean_vx * prediction_time
+                            )
+                            hybrid_pred_y = (
+                                ball_center[1]
+                                + raw_mean_vy * prediction_time
+                            )
+                            hybrid_method = "Raw"
+                        else:
+                            # Stationary / Moving時はEMA
+                            hybrid_pred_x = ema_pred_x
+                            hybrid_pred_y = ema_pred_y
+                            hybrid_method = "EMA"
+                        # 予測を保存
+                        hybrid_pending_predictions.append(
+                            (
+                                detection_time + prediction_time,
+                                (hybrid_pred_x, hybrid_pred_y),
+                                motion_state,
+                                hybrid_method
+                            )
+                        )
+
         previous_center = ball_center
         previous_smoothed_center = smoothed_center
         previous_time = detection_time
@@ -619,6 +665,7 @@ while True:
         ema_vx_history.clear()
         ema_vy_history.clear()
         ema_pending_predictions.clear()
+        hybrid_pending_predictions.clear()
         for window in window_sizes:
             pending_predictions[window].clear()
 
@@ -746,6 +793,33 @@ while True:
                 ema_state_prediction_errors[ema_prediction_state].append(
                     ema_error
                 )
+
+    # STEP 40-18：Hybrid方式の予測誤差を評価
+    if ball_center is not None:
+        while (
+            hybrid_pending_predictions
+            and hybrid_pending_predictions[0][0] <= detection_time
+        ):
+            (
+                target_time,
+                hybrid_predicted_center,
+                hybrid_state,
+                hybrid_method
+            ) = hybrid_pending_predictions.pop(0)
+            # 同じ検出中心を基準に誤差を計算
+            hybrid_error = np.hypot(
+                ball_center[0] - hybrid_predicted_center[0],
+                ball_center[1] - hybrid_predicted_center[1]
+            )
+            # 全体の誤差を保存
+            hybrid_prediction_errors.append(hybrid_error)
+            # 運動状態別の誤差を保存
+            if hybrid_state in hybrid_state_prediction_errors:
+                hybrid_state_prediction_errors[hybrid_state].append(
+                    hybrid_error
+                )
+            # 評価できた予測だけ使用方式をカウント
+            hybrid_method_counts[hybrid_method] += 1
 
     for i in range(1, len(trajectory)):
         point1 = trajectory[i - 1]
@@ -939,6 +1013,34 @@ for state in motion_states:
         print(f"EMA - Raw: {difference:.2f} px")
     else:
         print("Not enough predictions")
+
+# STEP 40-18：Hybrid方式の性能評価
+print("\n=== Raw vs EMA vs Hybrid ===")
+raw_errors = all_prediction_errors[5]
+ema_errors = ema_prediction_errors
+hybrid_errors = hybrid_prediction_errors
+if raw_errors and ema_errors and hybrid_errors:
+    raw_mean = np.mean(raw_errors)
+    ema_mean = np.mean(ema_errors)
+    hybrid_mean = np.mean(hybrid_errors)
+    print(f"Raw Window=5: {raw_mean:.2f} px")
+    print(f"EMA Window=5: {ema_mean:.2f} px")
+    print(f"Hybrid: {hybrid_mean:.2f} px")
+    print(f"Raw Predictions: {len(raw_errors)}")
+    print(f"EMA Predictions: {len(ema_errors)}")
+    print(f"Hybrid Predictions: {len(hybrid_errors)}")
+    print("\nHybrid Method Counts:")
+    print(f"Raw selected: {hybrid_method_counts['Raw']}")
+    print(f"EMA selected: {hybrid_method_counts['EMA']}")
+    if not (len(raw_errors) == len(ema_errors) == len(hybrid_errors)):
+        print("Warning: Prediction counts do not match")
+    if ema_mean > 0:
+        improvement = (ema_mean - hybrid_mean) / ema_mean * 100
+        print(f"Improvement over EMA: {improvement:.2f}%")
+    else:
+        print("Improvement over EMA: N/A (EMA mean error is zero)")
+else:
+    print("Not enough predictions")
 
 cap.release()
 cv2.destroyAllWindows()
