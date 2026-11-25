@@ -95,6 +95,11 @@ state_prediction_errors = {
     for state in motion_states
 }
 
+# STEP 40-17：EMA方式の運動状態別予測誤差
+ema_state_prediction_errors = {
+    state: [] for state in motion_states
+}
+
 # STEP 37：適応的Window選択の評価
 adaptive_errors = []
 adaptive_errors_recent = []
@@ -593,8 +598,11 @@ while True:
                             + ema_mean_vy * prediction_time
                         )
                         ema_pending_predictions.append(
-                            (detection_time + prediction_time,
-                             (ema_pred_x, ema_pred_y))
+                            (
+                                detection_time + prediction_time,
+                                (ema_pred_x, ema_pred_y),
+                                motion_state
+                            )
                         )
 
         previous_center = ball_center
@@ -725,7 +733,7 @@ while True:
             ema_pending_predictions
             and ema_pending_predictions[0][0] <= detection_time
         ):
-            target_time, ema_predicted_center = (
+            target_time, ema_predicted_center, ema_prediction_state = (
                 ema_pending_predictions.pop(0)
             )
             ema_error = np.hypot(
@@ -733,6 +741,11 @@ while True:
                 ball_center[1] - ema_predicted_center[1]
             )
             ema_prediction_errors.append(ema_error)
+            # STEP 40-17：運動状態ごとにEMA誤差を保存
+            if ema_prediction_state in ema_state_prediction_errors:
+                ema_state_prediction_errors[ema_prediction_state].append(
+                    ema_error
+                )
 
     for i in range(1, len(trajectory)):
         point1 = trajectory[i - 1]
@@ -903,6 +916,29 @@ if raw_errors and ema_prediction_errors:
         print("Warning: Prediction counts do not match")
 else:
     print("Not enough predictions")
+
+# STEP 40-17：運動状態別にRawとEMAを比較
+print("\n=== Raw vs EMA by Motion State ===")
+for state in motion_states:
+    raw_errors = state_prediction_errors[state][5]
+    ema_errors = ema_state_prediction_errors[state]
+    print(f"\n{state}:")
+    if raw_errors and ema_errors:
+        raw_mean = np.mean(raw_errors)
+        ema_mean = np.mean(ema_errors)
+        print(
+            f"Raw Window=5: {raw_mean:.2f} px"
+        )
+        print(
+            f"EMA Window=5: {ema_mean:.2f} px"
+        )
+        print(f"Raw Predictions: {len(raw_errors)}")
+        print(f"EMA Predictions: {len(ema_errors)}")
+        # EMA - Raw（負ならEMAの方が誤差が小さい）
+        difference = ema_mean - raw_mean
+        print(f"EMA - Raw: {difference:.2f} px")
+    else:
+        print("Not enough predictions")
 
 cap.release()
 cv2.destroyAllWindows()
